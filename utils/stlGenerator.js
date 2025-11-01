@@ -1,3 +1,17 @@
+/**
+ * STL Generator for Gridfinity Bins
+ * 
+ * This module generates Gridfinity-compatible storage bin STL files using JSCAD.
+ * It creates bins with proper base grid dimensions, magnet holes, and hollow compartments
+ * based on calculated object dimensions.
+ * 
+ * Gridfinity specifications:
+ * - Base unit: 42mm × 42mm
+ * - Base height: 7mm
+ * - Magnet holes: 6.5mm diameter, 2.5mm deep
+ * - Wall thickness: 1.5mm
+ */
+
 const { primitives, booleans, transforms, extrusions } = require('@jscad/modeling');
 const { cuboid, cylinder } = primitives;
 const { subtract, union } = booleans;

@@ -44,7 +44,8 @@ async function processImage(imagePath) {
     const objectHeightMM = objectPixelHeight / pixelsPerMM;
     
     // Estimate depth (in a real system, this would require multiple photos or user input)
-    // For now, use an average of width and height
+    // For now, use an average of width and height as a simple approximation
+    // This is a known limitation of single-image analysis
     const objectDepthMM = (objectWidthMM + objectHeightMM) / 2;
     
     // Calculate Gridfinity grid units (Gridfinity base unit is 42mm)
