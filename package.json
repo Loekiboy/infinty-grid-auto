@@ -1,0 +1,20 @@
+{
+  "name": "infinty-grid-auto",
+  "version": "1.0.0",
+  "description": "Gridfinity 3D model generator from photos with A4 reference",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["gridfinity", "3d", "stl", "generator"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@jscad/modeling": "^2.12.6",
+    "@jscad/stl-serializer": "^2.1.21",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "sharp": "^0.34.4"
+  }
+}
