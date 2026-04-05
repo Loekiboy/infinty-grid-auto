@@ -628,6 +628,21 @@ function generate3DModel() {
 
     let unitsX = 1, unitsY = 1;
     let shiftZ = 0;
+    
+    // Variables for Gridfinity and Bounding
+    let boxWidth, boxHeight, boxCX, boxCY, rX, rY, gridRadius;
+    
+    const buildRoundedRect = (s, x, y, width, height, r) => {
+        s.moveTo(x + r, y);
+        s.lineTo(x + width - r, y);
+        s.quadraticCurveTo(x + width, y, x + width, y + r);
+        s.lineTo(x + width, y + height - r);
+        s.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        s.lineTo(x + r, y + height);
+        s.quadraticCurveTo(x, y + height, x, y + height - r);
+        s.lineTo(x, y + r);
+        s.quadraticCurveTo(x, y, x + r, y);
+    };
 
     if (trayMode === 'exact') {
         let outerPoints = getOffsetPolygon(holePoints, wallThick);
@@ -654,8 +669,6 @@ function generate3DModel() {
             if (p.y > hMaxY) hMaxY = p.y;
         });
 
-        let boxWidth, boxHeight, boxCX, boxCY;
-
         if (trayMode === 'bounding') {
             boxWidth = (hMaxX - hMinX) + (wallThick * 2);
             boxHeight = (hMaxY - hMinY) + (wallThick * 2);
@@ -675,24 +688,12 @@ function generate3DModel() {
             shiftZ = 4.6; // We sit on top of the feet
         }
 
-        const rX = boxCX - boxWidth / 2;
-        const rY = boxCY - boxHeight / 2;
-        const radius = trayMode === 'gridfinity' ? 4.0 : 2;
+        rX = boxCX - boxWidth / 2;
+        rY = boxCY - boxHeight / 2;
+        gridRadius = trayMode === 'gridfinity' ? 4.0 : 2;
 
-        const buildRoundedRect = (s, x, y, width, height, r) => {
-            s.moveTo(x + r, y);
-            s.lineTo(x + width - r, y);
-            s.quadraticCurveTo(x + width, y, x + width, y + r);
-            s.lineTo(x + width, y + height - r);
-            s.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-            s.lineTo(x + r, y + height);
-            s.quadraticCurveTo(x, y + height, x, y + height - r);
-            s.lineTo(x, y + r);
-            s.quadraticCurveTo(x, y, x + r, y);
-        };
-
-        buildRoundedRect(outerShape, rX, rY, boxWidth, boxHeight, radius);
-        buildRoundedRect(baseShape, rX, rY, boxWidth, boxHeight, radius);
+        buildRoundedRect(outerShape, rX, rY, boxWidth, boxHeight, gridRadius);
+        buildRoundedRect(baseShape, rX, rY, boxWidth, boxHeight, gridRadius);
     }
 
     console.log("[Step 4] Shape defined. Creating Three.js geometries.");
@@ -739,6 +740,38 @@ function generate3DModel() {
 
     // Add Gridfinity Feet
     if (trayMode === 'gridfinity') {
+        const buildChamferWall = (pts1, pts2, z1, z2, faceOut) => {
+            const vertices = [];
+            const indices = [];
+            const len = pts1.length;
+            for(let i=0; i<len; i++) {
+                vertices.push(pts1[i].x, pts1[i].y, z1);
+            }
+            for(let i=0; i<len; i++) {
+                vertices.push(pts2[i].x, pts2[i].y, z2);
+            }
+            for(let i=0; i<len; i++) {
+                const next = (i+1)%len;
+                const v1 = i;
+                const v2 = next;
+                const v3 = i + len;
+                const v4 = next + len;
+                
+                if (faceOut) {
+                    indices.push(v1, v2, v4);
+                    indices.push(v1, v4, v3);
+                } else {
+                    indices.push(v1, v4, v2);
+                    indices.push(v1, v3, v4);
+                }
+            }
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            geom.setIndex(indices);
+            geom.computeVertexNormals();
+            return geom;
+        };
+
         const makeRoundedRect = (w, r) => {
             const s = new THREE.Shape();
             const hw = w/2;
@@ -762,18 +795,11 @@ function generate3DModel() {
         footGroup.add(new THREE.Mesh(bGeom, material));
 
         // 2. Chamfer
-        const slices = 12;
-        for(let i=0; i<slices; i++) {
-            const t = (i + 0.5) / slices;
-            const w = 36.6 + t * (41.5 - 36.6);
-            const r = 1.6 + t * (4.0 - 1.6);
-            const sliceGeom = new THREE.ExtrudeGeometry(makeRoundedRect(w, r), {depth: 2.4/slices, bevelEnabled: false});
-            sliceGeom.translate(0, 0, 0.8 + i * (2.4/slices));
-            footGroup.add(new THREE.Mesh(sliceGeom, material));
-        }
+        const tShape = makeRoundedRect(41.5, 4.0);
+        const cGeom = buildChamferWall(bShape.getPoints(), tShape.getPoints(), 0.8, 3.2, true);
+        footGroup.add(new THREE.Mesh(cGeom, material));
 
         // 3. Top straight
-        const tShape = makeRoundedRect(41.5, 4.0);
         const tGeom = new THREE.ExtrudeGeometry(tShape, {depth: 1.4, bevelEnabled: false});
         tGeom.translate(0, 0, 3.2);
         footGroup.add(new THREE.Mesh(tGeom, material));
@@ -799,6 +825,51 @@ function generate3DModel() {
                 trayMesh.add(foot);
             }
         }
+
+        // Add Gridfinity Top Lip (Stacking Lip)
+        const lipGroup = new THREE.Group();
+        lipGroup.position.z = shiftZ + baseThick + wallHeight;
+        
+        const baseLipThick = 2.4;
+        const topThick = 0.8;
+
+        const sOuter = new THREE.Shape();
+        buildRoundedRect(sOuter, rX, rY, boxWidth, boxHeight, gridRadius);
+
+        const sInner1 = new THREE.Shape();
+        buildRoundedRect(sInner1, rX + baseLipThick, rY + baseLipThick, boxWidth - baseLipThick*2, boxHeight - baseLipThick*2, Math.max(0.1, gridRadius - baseLipThick));
+
+        const sInner2 = new THREE.Shape();
+        buildRoundedRect(sInner2, rX + topThick, rY + topThick, boxWidth - topThick*2, boxHeight - topThick*2, Math.max(0.1, gridRadius - topThick));
+
+        const getHole = (innerShape) => {
+            const pts = innerShape.extractPoints().shape;
+            if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
+            return new THREE.Path(pts);
+        };
+
+        // 1. Lower straight part (Depth 1.8)
+        const sBotFace = new THREE.Shape(sOuter.extractPoints().shape);
+        sBotFace.holes.push(getHole(sInner1));
+        const baseGeomLip = new THREE.ExtrudeGeometry(sBotFace, {depth: 1.8, bevelEnabled: false});
+        lipGroup.add(new THREE.Mesh(baseGeomLip, material));
+        
+        // 2. Chamfer part (Depth 1.8)
+        const outPts = sOuter.getPoints();
+        const outGeom = buildChamferWall(outPts, outPts, 1.8, 3.6, true);
+        lipGroup.add(new THREE.Mesh(outGeom, material));
+
+        const inGeom = buildChamferWall(sInner1.getPoints(), sInner2.getPoints(), 1.8, 3.6, false);
+        lipGroup.add(new THREE.Mesh(inGeom, material));
+
+        // 3. Top straight part (Depth 0.8)
+        const sTopFace = new THREE.Shape(sOuter.extractPoints().shape);
+        sTopFace.holes.push(getHole(sInner2));
+        const topGeomLip = new THREE.ExtrudeGeometry(sTopFace, {depth: 0.8, bevelEnabled: false});
+        topGeomLip.translate(0, 0, 3.6);
+        lipGroup.add(new THREE.Mesh(topGeomLip, material));
+
+        trayMesh.add(lipGroup);
     }
 
     trayMesh.rotation.x = -Math.PI / 2;
