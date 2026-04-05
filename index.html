@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Tray Generator</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Three.js and STLExporter via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/exporters/STLExporter.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>3D Tray Generator</h1>
+            <p>Upload image • Trace shape • Generate STL</p>
+        </div>
+    </header>
+    
+    <div class="main-container">
+        <!-- Left Panel: 2D SVG Editor -->
+        <div class="panel left-panel">
+            <div class="panel-header">
+                <h2>Image & Tracing</h2>
+                <span class="step-badge">Step 1-2</span>
+            </div>
+            
+            <div class="upload-section">
+                <input type="file" id="imageUpload" accept="image/*" class="file-input">
+                <label for="imageUpload" class="file-label">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <span>Upload Image</span>
+                </label>
+            </div>
+
+            <div class="mode-controls" id="modeControls" style="display: none;">
+                <div class="control-group">
+                    <label class="mode-label">
+                        <input type="radio" name="toolMode" value="calibrate" checked>
+                        <span>Calibrate Scale</span>
+                    </label>
+                    <label class="mode-label">
+                        <input type="radio" name="toolMode" value="trace">
+                        <span>Trace Shape</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="calibration-section" id="calibrationInput" style="display: none;">
+                <label class="input-label">
+                    <span>Reference Line Length (mm)</span>
+                    <input type="number" id="refLength" value="50" step="1" min="1">
+                </label>
+            </div>
+
+            <div class="curve-tension-section" id="curveTensionSection" style="display: none;">
+                <label class="input-label">
+                    <span>Curve Smoothness</span>
+                    <div class="slider-container">
+                        <input type="range" id="curveTension" min="0" max="1" step="0.05" value="0.3" class="slider">
+                        <span class="slider-value" id="tensionValue">30%</span>
+                    </div>
+                    <small>Higher = more rounded curves</small>
+                </label>
+            </div>
+
+            <div class="canvas-container" id="svgContainer">
+                <svg id="editorSvg"></svg>
+            </div>
+            
+            <div class="trace-controls" id="traceControls" style="display: none;">
+                <button id="clearShapeBtn" class="btn btn-secondary">Clear Shape</button>
+                <div class="trace-hint">
+                    <small>ℹ Click points to trace • Click first point again to close</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: 3D Preview & Export -->
+        <div class="panel right-panel">
+            <div class="panel-header">
+                <h2>3D Model & Settings</h2>
+                <span class="step-badge">Step 3-4</span>
+            </div>
+            
+            <div class="settings-section">
+                <div class="setting-item">
+                    <label class="input-label">
+                        <span>Base Thickness (mm)</span>
+                        <input type="number" id="baseThickness" value="2" step="0.5">
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label class="input-label">
+                        <span>Wall Height (mm)</span>
+                        <input type="number" id="wallHeight" value="10" step="1">
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label class="input-label">
+                        <span>Wall Thickness (mm)</span>
+                        <input type="number" id="wallThickness" value="3" step="1">
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label class="input-label">
+                        <span>Tolerance / Gap (mm)</span>
+                        <input type="number" id="tolerance" value="0.5" step="0.1">
+                    </label>
+                </div>
+            </div>
+            
+            <div class="action-buttons">
+                <button id="generate3dBtn" class="btn btn-primary" disabled>Generate 3D Model</button>
+                <button id="downloadStlBtn" class="btn btn-success" disabled>Download STL</button>
+            </div>
+
+            <div class="viewer-container" id="viewer3d">
+                <!-- Three.js canvas will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Clipper.js for polygon offsetting -->
+    <script src="https://cdn.jsdelivr.net/npm/clipper-lib@1.0.0/clipper.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
