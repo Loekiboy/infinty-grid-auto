@@ -594,7 +594,8 @@ function generate3DModel() {
     const wallHeight = parseFloat(document.getElementById('wallHeight').value);
     const wallThick = parseFloat(document.getElementById('wallThickness').value);
     const tolerance = parseFloat(document.getElementById('tolerance').value);
-    console.log(`[Step 2] Parameters: baseThick=${baseThick}, wallHeight=${wallHeight}, wallThick=${wallThick}, tolerance=${tolerance}`);
+    const trayMode = document.getElementById('trayMode').value;
+    console.log(`[Step 2] Parameters: baseThick=${baseThick}, wallHeight=${wallHeight}, wallThick=${wallThick}, tolerance=${tolerance}, mode=${trayMode}`);
 
     // Use smoothed trace points
     const smoothedPoints = extractPointsFromBezier(tracePoints);
@@ -618,23 +619,83 @@ function generate3DModel() {
     }));
 
     let holePoints = getOffsetPolygon(mmPoints, tolerance);
-    let outerPoints = getOffsetPolygon(holePoints, wallThick);
-
-    // Ensure correct winding order
-    const outerIsCW = THREE.ShapeUtils.isClockWise(outerPoints);
-    if (outerIsCW) outerPoints.reverse();
 
     const holeIsCW = THREE.ShapeUtils.isClockWise(holePoints);
     if (!holeIsCW) holePoints.reverse();
 
-    console.log("[Step 4] Winding order fixed. Creating Three.js shapes.");
-
-    // Create Shapes
     const outerShape = new THREE.Shape();
-    outerPoints.forEach((p, i) => {
-        if (i === 0) outerShape.moveTo(p.x, p.y);
-        else outerShape.lineTo(p.x, p.y);
-    });
+    const baseShape = new THREE.Shape();
+
+    let unitsX = 1, unitsY = 1;
+    let shiftZ = 0;
+
+    if (trayMode === 'exact') {
+        let outerPoints = getOffsetPolygon(holePoints, wallThick);
+        
+        const outerIsCW = THREE.ShapeUtils.isClockWise(outerPoints);
+        if (outerIsCW) outerPoints.reverse();
+
+        outerPoints.forEach((p, i) => {
+            if (i === 0) {
+                outerShape.moveTo(p.x, p.y);
+                baseShape.moveTo(p.x, p.y);
+            } else {
+                outerShape.lineTo(p.x, p.y);
+                baseShape.lineTo(p.x, p.y);
+            }
+        });
+    } else {
+        // Bounding or Gridfinity mode
+        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+        holePoints.forEach(p => {
+            if (p.x < hMinX) hMinX = p.x;
+            if (p.x > hMaxX) hMaxX = p.x;
+            if (p.y < hMinY) hMinY = p.y;
+            if (p.y > hMaxY) hMaxY = p.y;
+        });
+
+        let boxWidth, boxHeight, boxCX, boxCY;
+
+        if (trayMode === 'bounding') {
+            boxWidth = (hMaxX - hMinX) + (wallThick * 2);
+            boxHeight = (hMaxY - hMinY) + (wallThick * 2);
+            boxCX = (hMaxX + hMinX) / 2;
+            boxCY = (hMaxY + hMinY) / 2;
+        } else if (trayMode === 'gridfinity') {
+            const minInnerWidth = (hMaxX - hMinX) + (wallThick * 2);
+            const minInnerHeight = (hMaxY - hMinY) + (wallThick * 2);
+            
+            unitsX = Math.ceil(minInnerWidth / 42);
+            unitsY = Math.ceil(minInnerHeight / 42);
+            
+            boxWidth = unitsX * 42 - 0.5;
+            boxHeight = unitsY * 42 - 0.5;
+            boxCX = (hMaxX + hMinX) / 2;
+            boxCY = (hMaxY + hMinY) / 2;
+            shiftZ = 4.6; // We sit on top of the feet
+        }
+
+        const rX = boxCX - boxWidth / 2;
+        const rY = boxCY - boxHeight / 2;
+        const radius = trayMode === 'gridfinity' ? 4.0 : 2;
+
+        const buildRoundedRect = (s, x, y, width, height, r) => {
+            s.moveTo(x + r, y);
+            s.lineTo(x + width - r, y);
+            s.quadraticCurveTo(x + width, y, x + width, y + r);
+            s.lineTo(x + width, y + height - r);
+            s.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+            s.lineTo(x + r, y + height);
+            s.quadraticCurveTo(x, y + height, x, y + height - r);
+            s.lineTo(x, y + r);
+            s.quadraticCurveTo(x, y, x + r, y);
+        };
+
+        buildRoundedRect(outerShape, rX, rY, boxWidth, boxHeight, radius);
+        buildRoundedRect(baseShape, rX, rY, boxWidth, boxHeight, radius);
+    }
+
+    console.log("[Step 4] Shape defined. Creating Three.js geometries.");
 
     const holeShape = new THREE.Path();
     holePoints.forEach((p, i) => {
@@ -651,18 +712,14 @@ function generate3DModel() {
     });
 
     console.log("[Step 6] Extruding base.");
-    const baseShape = new THREE.Shape();
-    outerPoints.forEach((p, i) => {
-        if (i === 0) baseShape.moveTo(p.x, p.y);
-        else baseShape.lineTo(p.x, p.y);
-    });
-
+    
     const baseGeom = new THREE.ExtrudeGeometry(baseShape, {
         depth: baseThick,
         bevelEnabled: false
     });
 
-    wallGeom.translate(0, 0, baseThick);
+    wallGeom.translate(0, 0, shiftZ + baseThick);
+    baseGeom.translate(0, 0, shiftZ);
 
     wallGeom.computeVertexNormals();
     baseGeom.computeVertexNormals();
@@ -679,6 +736,70 @@ function generate3DModel() {
     trayMesh = new THREE.Group();
     trayMesh.add(wallMesh);
     trayMesh.add(baseMesh);
+
+    // Add Gridfinity Feet
+    if (trayMode === 'gridfinity') {
+        const makeRoundedRect = (w, r) => {
+            const s = new THREE.Shape();
+            const hw = w/2;
+            s.moveTo(hw - r, -hw);
+            s.quadraticCurveTo(hw, -hw, hw, -hw + r);
+            s.lineTo(hw, hw - r);
+            s.quadraticCurveTo(hw, hw, hw - r, hw);
+            s.lineTo(-hw + r, hw);
+            s.quadraticCurveTo(-hw, hw, -hw, hw - r);
+            s.lineTo(-hw, -hw + r);
+            s.quadraticCurveTo(-hw, -hw, -hw + r, -hw);
+            s.lineTo(hw - r, -hw);
+            return s;
+        };
+
+        const footGroup = new THREE.Group();
+
+        // 1. Bottom straight
+        const bShape = makeRoundedRect(36.6, 1.6);
+        const bGeom = new THREE.ExtrudeGeometry(bShape, {depth: 0.8, bevelEnabled: false});
+        footGroup.add(new THREE.Mesh(bGeom, material));
+
+        // 2. Chamfer
+        const slices = 12;
+        for(let i=0; i<slices; i++) {
+            const t = (i + 0.5) / slices;
+            const w = 36.6 + t * (41.5 - 36.6);
+            const r = 1.6 + t * (4.0 - 1.6);
+            const sliceGeom = new THREE.ExtrudeGeometry(makeRoundedRect(w, r), {depth: 2.4/slices, bevelEnabled: false});
+            sliceGeom.translate(0, 0, 0.8 + i * (2.4/slices));
+            footGroup.add(new THREE.Mesh(sliceGeom, material));
+        }
+
+        // 3. Top straight
+        const tShape = makeRoundedRect(41.5, 4.0);
+        const tGeom = new THREE.ExtrudeGeometry(tShape, {depth: 1.4, bevelEnabled: false});
+        tGeom.translate(0, 0, 3.2);
+        footGroup.add(new THREE.Mesh(tGeom, material));
+
+        let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
+        holePoints.forEach(p => {
+            if (p.x < hMinX) hMinX = p.x;
+            if (p.x > hMaxX) hMaxX = p.x;
+            if (p.y < hMinY) hMinY = p.y;
+            if (p.y > hMaxY) hMaxY = p.y;
+        });
+        const boxCX = (hMaxX + hMinX) / 2;
+        const boxCY = (hMaxY + hMinY) / 2;
+
+        const startX = boxCX - ((unitsX - 1) * 42) / 2;
+        const startY = boxCY - ((unitsY - 1) * 42) / 2;
+
+        for (let x=0; x<unitsX; x++) {
+            for (let y=0; y<unitsY; y++) {
+                const foot = footGroup.clone();
+                foot.position.x = startX + x * 42;
+                foot.position.y = startY + y * 42;
+                trayMesh.add(foot);
+            }
+        }
+    }
 
     trayMesh.rotation.x = -Math.PI / 2;
 

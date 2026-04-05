@@ -89,9 +89,19 @@
             </div>
             
             <div class="settings-section">
+                <div class="setting-item full-width">
+                    <label class="input-label">
+                        <span>Tray Mode</span>
+                        <select id="trayMode" class="select-input">
+                            <option value="exact">Exact Shape</option>
+                            <option value="bounding">Square Around It</option>
+                            <option value="gridfinity">Gridfinity Base</option>
+                        </select>
+                    </label>
+                </div>
                 <div class="setting-item">
                     <label class="input-label">
-                        <span>Base Thickness (mm)</span>
+                        <span>Base Thickness (mm) (Dikte van de bodem)</span>
                         <input type="number" id="baseThickness" value="2" step="0.5">
                     </label>
                 </div>

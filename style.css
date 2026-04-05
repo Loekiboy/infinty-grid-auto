@@ -21,7 +21,7 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: #f4f4f5;
     color: var(--text-primary);
     display: flex;
     flex-direction: column;
@@ -30,24 +30,23 @@ body {
 }
 
 header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 1.25rem 1.5rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    background: #ffffff;
+    color: var(--text-primary);
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .header-content h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 600;
     margin-bottom: 0.25rem;
     letter-spacing: -0.5px;
 }
 
 .header-content p {
     font-size: 0.85rem;
-    opacity: 0.95;
-    font-weight: 300;
-    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    font-weight: 400;
 }
 
 .main-container {
@@ -60,25 +59,24 @@ header {
 
 .panel {
     background: var(--bg-primary);
-    border-radius: 12px;
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
     border: 1px solid var(--border-color);
-    transition: box-shadow 0.3s ease;
+    transition: box-shadow 0.2s ease;
 }
 
 .panel:hover {
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
 .panel-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.2rem 0.75rem;
-    border-bottom: 2px solid var(--secondary-color);
-}
+    padding: 1rem 1.2rem;
+    border-bottom: 1px solid var(--secondary-color);
 }
 
 .panel-header h2 {
@@ -124,7 +122,7 @@ header {
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1.2rem;
-    background: linear-gradient(135deg, var(--primary-light) 0%, #e8f4ff 100%);
+    background: var(--primary-light);
     border: 2px dashed var(--primary-color);
     border-radius: 8px;
     cursor: pointer;
@@ -134,7 +132,7 @@ header {
 }
 
 .file-label:hover {
-    background: linear-gradient(135deg, var(--primary-light) 0%, #e0ecff 100%);
+    background: #dbebff;
     border-color: var(--primary-dark);
     transform: translateY(-2px);
 }
@@ -202,15 +200,20 @@ header {
     color: var(--text-primary);
 }
 
-.input-label input[type="number"] {
+.input-label input[type="number"],
+.select-input {
     padding: 0.75rem;
     border: 1px solid var(--border-color);
     border-radius: 6px;
     font-size: 1rem;
     transition: border-color 0.2s;
+    width: 100%;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
 }
 
-.input-label input[type="number"]:focus {
+.input-label input[type="number"]:focus,
+.select-input:focus {
     outline: none;
     border-color: var(--primary-color);
     box-shadow: 0 0 0 3px var(--primary-light);
@@ -332,6 +335,10 @@ header {
     flex-direction: column;
 }
 
+.setting-item.full-width {
+    grid-column: 1 / -1;
+}
+
 .setting-item .input-label {
     gap: 0.5rem;
 }
@@ -350,7 +357,7 @@ header {
     border: none;
     border-radius: 6px;
     font-size: 0.95rem;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
     letter-spacing: 0.3px;
@@ -361,19 +368,17 @@ header {
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-dark) 100%);
+    background: var(--primary-color);
     color: white;
     flex: 1;
-    box-shadow: 0 4px 15px rgba(0, 102, 204, 0.3);
 }
 
 .btn-primary:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 102, 204, 0.4);
+    background: var(--primary-dark);
 }
 
 .btn-primary:active:not(:disabled) {
-    transform: translateY(0);
+    transform: translateY(1px);
 }
 
 .btn-secondary {
@@ -384,23 +389,21 @@ header {
 }
 
 .btn-secondary:hover:not(:disabled) {
-    background: #efefef;
+    background: #e5e5e5;
 }
 
 .btn-success {
-    background: linear-gradient(135deg, var(--success-color) 0%, var(--success-dark) 100%);
+    background: var(--success-color);
     color: white;
     flex: 1;
-    box-shadow: 0 4px 15px rgba(0, 168, 84, 0.3);
 }
 
 .btn-success:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 168, 84, 0.4);
+    background: var(--success-dark);
 }
 
 .btn-success:active:not(:disabled) {
-    transform: translateY(0);
+    transform: translateY(1px);
 }
 
 .btn:disabled {
