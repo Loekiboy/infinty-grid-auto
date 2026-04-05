@@ -56,6 +56,9 @@ document.querySelectorAll('input[name="toolMode"]').forEach(radio => {
 editorSvg.addEventListener('mousedown', handleSvgMouseDown);
 editorSvg.addEventListener('mousemove', handleSvgMouseMove);
 editorSvg.addEventListener('mouseup', handleSvgMouseUp);
+editorSvg.addEventListener('wheel', handleSvgWheel);
+// Add context menu disable to enable right-click panning
+editorSvg.addEventListener('contextmenu', e => e.preventDefault());
 
 clearShapeBtn.addEventListener('click', () => {
     tracePoints = [];
@@ -112,7 +115,13 @@ function setupSvgCanvas() {
 
     // Set viewBox to actual image dimensions - this defines the coordinate system
     // Coordinates in SVG will directly match image pixels
-    editorSvg.setAttribute('viewBox', `0 0 ${img.width} ${img.height}`);
+    viewBoxState = { 
+        x: 0, 
+        y: 0, 
+        w: img.width, 
+        h: img.height 
+    };
+    editorSvg.setAttribute('viewBox', `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
     editorSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
     
     // Let CSS handle the display sizing
@@ -163,9 +172,9 @@ function redrawSvg() {
     const oldFills = tracePathElement.parentNode.querySelectorAll('.fill-path');
     oldFills.forEach(el => el.remove());
 
-    // Calculate visual scale so sizes match screen visually
+    // Calculate visual scale so sizes match screen visually regardless of zoom
     const rect = editorSvg.getBoundingClientRect();
-    const vScale = rect.width ? img.width / rect.width : 1;
+    const vScale = rect.width ? viewBoxState.w / rect.width : 1;
 
     // Draw calibration line if in calibrate mode
     if (mode === 'calibrate' && calibStart && calibEnd) {
@@ -305,74 +314,160 @@ function generateBezierPath(points, closed) {
 // ========================
 
 let isDraggingCalib = false;
+let dragPointIndex = -1;
 
-function handleSvgMouseDown(e) {
+// Pan & Zoom state
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let viewBoxState = { x: 0, y: 0, w: 0, h: 0 }; // Initialize on image load
+
+function startPan(e, x, y) {
+    if (e.button === 1 || e.button === 2) { // Middle or Right click
+        e.preventDefault();
+        isPanning = true;
+        panStart = { x: e.clientX, y: e.clientY };
+        return true;
+    }
+    return false;
+}
+
+function handleSvgWheel(e) {
     if (!imageLoaded) return;
-
+    e.preventDefault();
+    
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     
-    // Parse viewBox correctly to get coordinate system
-    const viewBox = svg.getAttribute('viewBox').split(/[\s,]+/).map(Number);
-    const viewBoxWidth = viewBox[2];  // width from viewBox
-    const viewBoxHeight = viewBox[3]; // height from viewBox
+    // Zoom factor
+    const zoomIntensity = 0.1;
+    const zoom = e.deltaY < 0 ? (1 - zoomIntensity) : (1 + zoomIntensity);
     
-    // Calculate scale factors from display size to coordinate system
-    const scaleX = viewBoxWidth / rect.width;
-    const scaleY = viewBoxHeight / rect.height;
+    // Mouse focus point relative to SVG rect
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    // Calculate scale factor from view to SVG size
+    const scaleX = viewBoxState.w / rect.width;
+    const scaleY = viewBoxState.h / rect.height;
+
+    // ViewBox target coords
+    const viewTargetX = viewBoxState.x + mouseX * scaleX;
+    const viewTargetY = viewBoxState.y + mouseY * scaleY;
+
+    // New ViewBox dimensions
+    const newW = viewBoxState.w * zoom;
+    const newH = viewBoxState.h * zoom;
+
+    // Adjust X and Y so zoom centers on mouse
+    viewBoxState.x = viewTargetX - (mouseX / rect.width) * newW;
+    viewBoxState.y = viewTargetY - (mouseY / rect.height) * newH;
+    viewBoxState.w = newW;
+    viewBoxState.h = newH;
+
+    svg.setAttribute('viewBox', `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
+    redrawSvg(); // Important for stroke-widths and circle sizes based on zoom
+}
+
+function handleSvgMouseDown(e) {
+    if (!imageLoaded) return;
+    
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    
+    const scaleX = viewBoxState.w / rect.width;
+    const scaleY = viewBoxState.h / rect.height;
+
+    // Translated coords using actual viewbox bounds
+    const x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
+    const y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
+
+    if (startPan(e, x, y)) return;
 
     if (mode === 'calibrate') {
         calibStart = { x, y };
         calibEnd = { x, y };
         isDraggingCalib = true;
         redrawSvg();
-    } else if (mode === 'trace' && !shapeClosed) {
-        // Check if clicking near first point to close shape
-        if (tracePoints.length > 2) {
-            const firstPoint = tracePoints[0];
-            const distance = Math.sqrt((x - firstPoint.x) ** 2 + (y - firstPoint.y) ** 2);
-            const visualThreshold = 15 * scaleX; // Scale 15px screen distance to image coordinate system
-            if (distance < visualThreshold) {
+    } else if (mode === 'trace') {
+        const visualThreshold = 15 * scaleX;
+
+        // 1. Check if we're clicking an existing point to DRAG it
+        const clickedIndex = tracePoints.findIndex(p => {
+            return Math.sqrt((x - p.x) ** 2 + (y - p.y) ** 2) < visualThreshold;
+        });
+
+        if (clickedIndex !== -1) {
+            // Check if clicking first point to close shape (only matters if dragging first point and want to close)
+            if (clickedIndex === 0 && !shapeClosed && tracePoints.length > 2) {
                 shapeClosed = true;
                 checkReadyFor3D();
                 redrawSvg();
                 return;
             }
+            dragPointIndex = clickedIndex;
+            return; // We grabbed a point, don't generate a new one
         }
 
-        tracePoints.push({ x, y });
-        redrawSvg();
+        // 2. Otherwise add new point if not closed
+        if (!shapeClosed) {
+            tracePoints.push({ x, y });
+            redrawSvg();
+        }
     }
 }
 
 function handleSvgMouseMove(e) {
-    if (!imageLoaded || !isDraggingCalib || mode !== 'calibrate') return;
+    if (!imageLoaded) return;
 
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     
-    // Parse viewBox correctly
-    const viewBox = svg.getAttribute('viewBox').split(/[\s,]+/).map(Number);
-    const viewBoxWidth = viewBox[2];
-    const viewBoxHeight = viewBox[3];
-    
-    const scaleX = viewBoxWidth / rect.width;
-    const scaleY = viewBoxHeight / rect.height;
+    const scaleX = viewBoxState.w / rect.width;
+    const scaleY = viewBoxState.h / rect.height;
 
-    calibEnd.x = (e.clientX - rect.left) * scaleX;
-    calibEnd.y = (e.clientY - rect.top) * scaleY;
-    redrawSvg();
+    if (isPanning) {
+        const dx = (e.clientX - panStart.x) * scaleX;
+        const dy = (e.clientY - panStart.y) * scaleY;
+        
+        viewBoxState.x -= dx;
+        viewBoxState.y -= dy;
+        
+        svg.setAttribute('viewBox', `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
+        
+        panStart = { x: e.clientX, y: e.clientY };
+        return;
+    }
+
+    if (mode === 'calibrate' && isDraggingCalib) {
+        calibEnd.x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
+        calibEnd.y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
+        redrawSvg();
+    } 
+    else if (mode === 'trace' && dragPointIndex !== -1) {
+        // Dragging an individual point
+        tracePoints[dragPointIndex].x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
+        tracePoints[dragPointIndex].y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
+        redrawSvg();
+    }
 }
 
-function handleSvgMouseUp() {
+function handleSvgMouseUp(e) {
+    if (isPanning) {
+        isPanning = false;
+        return;
+    }
+
     if (mode === 'calibrate' && isDraggingCalib) {
         isDraggingCalib = false;
         updateCalibration();
     }
+    
+    if (mode === 'trace' && dragPointIndex !== -1) {
+        dragPointIndex = -1;
+        checkReadyFor3D(); // Trigger 3D update if closed
+    }
 }
+
 
 function updateCalibration() {
     if (calibStart && calibEnd) {
