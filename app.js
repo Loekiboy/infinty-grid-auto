@@ -24,10 +24,8 @@ let calibEnd = null;
 let pixelsPerMm = null;
 
 // Trace state
-let traces = [[]];
-let shapeClosed = [false]; // [false];
-let activeTrace = 0;
-let fingerHoles = [];
+let tracePoints = [];
+let shapeClosed = false;
 let curveTension = 0.3;
 
 // SVG Elements
@@ -50,8 +48,7 @@ document.querySelectorAll('input[name="toolMode"]').forEach(radio => {
         mode = e.target.value;
         calibrationInput.style.display = mode === 'calibrate' ? 'block' : 'none';
         curveTensionSection.style.display = mode === 'trace' ? 'block' : 'none';
-        traceControls.style.display = (mode === 'trace' || mode === 'finger') ? 'flex' : 'none';
-document.getElementById('fingerSizeContainer').style.display = mode === 'finger' ? 'block' : 'none';
+        traceControls.style.display = mode === 'trace' ? 'flex' : 'none';
         redrawSvg();
     });
 });
@@ -63,20 +60,9 @@ editorSvg.addEventListener('wheel', handleSvgWheel);
 // Add context menu disable to enable right-click panning
 editorSvg.addEventListener('contextmenu', e => e.preventDefault());
 
-document.getElementById('newShapeBtn')?.addEventListener('click', () => {
-    if (traces[activeTrace].length > 2) {
-        traces.push([]);
-        shapeClosed.push(false);
-        activeTrace = traces.length - 1;
-        redrawSvg();
-    }
-});
-
 clearShapeBtn.addEventListener('click', () => {
-    traces = [[]];
-    shapeClosed = [false];
-    activeTrace = 0;
-    fingerHoles = [];
+    tracePoints = [];
+    shapeClosed = false;
     redrawSvg();
     generate3dBtn.disabled = true;
 });
@@ -111,8 +97,8 @@ function handleImageUpload(e) {
             // Reset state
             calibStart = null;
             calibEnd = null;
-            traces = [[]]; // [];
-            shapeClosed = [false]; // false;
+            tracePoints = [];
+            shapeClosed = false;
             pixelsPerMm = null;
             
             setupSvgCanvas();
@@ -179,14 +165,18 @@ function setupSvgCanvas() {
 function redrawSvg() {
     if (!imageLoaded || !calibrationLine || !pointsGroup || !tracePathElement) return;
 
+    // Clear calibration group
     calibrationLine.innerHTML = '';
+    
+    // Clear old fill paths to prevent duplicates on every redraw
     const oldFills = tracePathElement.parentNode.querySelectorAll('.fill-path');
     oldFills.forEach(el => el.remove());
-    tracePathElement.setAttribute('d', ''); // Clear primary path
 
+    // Calculate visual scale so sizes match screen visually regardless of zoom
     const rect = editorSvg.getBoundingClientRect();
     const vScale = rect.width ? viewBoxState.w / rect.width : 1;
 
+    // Draw calibration line if in calibrate mode
     if (mode === 'calibrate' && calibStart && calibEnd) {
         const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         line.setAttribute('x1', calibStart.x);
@@ -198,83 +188,86 @@ function redrawSvg() {
         line.setAttribute('stroke-dasharray', `${5 * vScale},${5 * vScale}`);
         calibrationLine.appendChild(line);
 
+        // Start circle
         const circle1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle1.setAttribute('cx', calibStart.x); circle1.setAttribute('cy', calibStart.y); circle1.setAttribute('r', 6 * vScale);
-        circle1.setAttribute('fill', '#c0392b'); circle1.setAttribute('stroke', 'white'); circle1.setAttribute('stroke-width', 2 * vScale);
+        circle1.setAttribute('cx', calibStart.x);
+        circle1.setAttribute('cy', calibStart.y);
+        circle1.setAttribute('r', 6 * vScale);
+        circle1.setAttribute('fill', '#c0392b');
+        circle1.setAttribute('stroke', 'white');
+        circle1.setAttribute('stroke-width', 2 * vScale);
         calibrationLine.appendChild(circle1);
 
+        // End circle
         const circle2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        circle2.setAttribute('cx', calibEnd.x); circle2.setAttribute('cy', calibEnd.y); circle2.setAttribute('r', 6 * vScale);
-        circle2.setAttribute('fill', '#c0392b'); circle2.setAttribute('stroke', 'white'); circle2.setAttribute('stroke-width', 2 * vScale);
+        circle2.setAttribute('cx', calibEnd.x);
+        circle2.setAttribute('cy', calibEnd.y);
+        circle2.setAttribute('r', 6 * vScale);
+        circle2.setAttribute('fill', '#c0392b');
+        circle2.setAttribute('stroke', 'white');
+        circle2.setAttribute('stroke-width', 2 * vScale);
         calibrationLine.appendChild(circle2);
     }
 
-    if (mode === 'trace' || mode === 'finger') {
-        pointsGroup.innerHTML = '';
-        
-        let pathStr = "";
-        
-        for (let t = 0; t < traces.length; t++) {
-            let traceP = traces[t];
-            let closed = shapeClosed[t];
-            
-            if (traceP.length === 2 && !closed) {
-                pathStr += `M ${traceP[0].x} ${traceP[0].y} L ${traceP[1].x} ${traceP[1].y} `;
-            } else if (traceP.length >= 3) {
-                pathStr += generateBezierPath(traceP, closed) + " ";
-            }
-            
-            traceP.forEach((p, i) => {
-                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                circle.setAttribute('cx', p.x);
-                circle.setAttribute('cy', p.y);
-                circle.setAttribute('r', 5 * vScale);
-                circle.setAttribute('fill', i === 0 && closed ? '#f39c12' : '#27ae60');
-                circle.setAttribute('stroke', 'white');
-                circle.setAttribute('stroke-width', 2 * vScale);
-                circle.setAttribute('class', 'control-point');
-                pointsGroup.appendChild(circle);
-            });
-
-            if (!closed && traceP.length > 2 && t === activeTrace) {
-                const firstPoint = traceP[0];
-                const ghostCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-                ghostCircle.setAttribute('cx', firstPoint.x);
-                ghostCircle.setAttribute('cy', firstPoint.y);
-                ghostCircle.setAttribute('r', 12 * vScale);
-                ghostCircle.setAttribute('fill', 'none');
-                ghostCircle.setAttribute('stroke', '#f39c12');
-                ghostCircle.setAttribute('stroke-width', 2 * vScale);
-                ghostCircle.setAttribute('stroke-dasharray', `${2 * vScale},${2 * vScale}`);
-                ghostCircle.setAttribute('opacity', '0.7');
-                pointsGroup.appendChild(ghostCircle);
-            }
-
-            if (closed) {
-                const fillPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                fillPath.setAttribute('class', 'fill-path');
-                fillPath.setAttribute('d', generateBezierPath(traceP, true));
-                fillPath.setAttribute('fill', 'rgba(46, 204, 113, 0.15)');
-                fillPath.setAttribute('stroke', 'none');
-                tracePathElement.parentNode.insertBefore(fillPath, tracePathElement);
-            }
-        }
-        
+    // Draw trace path with curves
+    if (mode === 'trace' && tracePoints.length > 0) {
         tracePathElement.setAttribute('stroke-width', 3 * vScale);
-        tracePathElement.setAttribute('d', pathStr.trim());
         
-        // Draw Finger Holes
-        const pxMm = pixelsPerMm || 1;
-        fingerHoles.forEach(f => {
-            const h = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            h.setAttribute('cx', f.x);
-            h.setAttribute('cy', f.y);
-            h.setAttribute('r', f.r * pxMm); // visual width
-            h.setAttribute('fill', 'rgba(231, 76, 60, 0.4)');
-            h.setAttribute('stroke', '#e74c3c');
-            h.setAttribute('stroke-width', 2 * vScale);
-            pointsGroup.appendChild(h);
+        if (tracePoints.length === 1) {
+            // Just a single point
+            tracePathElement.setAttribute('d', '');
+        } else if (tracePoints.length === 2) {
+            // Straight line between two points
+            const d = `M ${tracePoints[0].x} ${tracePoints[0].y} L ${tracePoints[1].x} ${tracePoints[1].y}`;
+            tracePathElement.setAttribute('d', d);
+        } else {
+            // Smooth curve through multiple points
+            const pathData = generateBezierPath(tracePoints, shapeClosed);
+            tracePathElement.setAttribute('d', pathData);
+        }
+
+        // Draw control points
+        pointsGroup.innerHTML = '';
+        tracePoints.forEach((p, i) => {
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', p.x);
+            circle.setAttribute('cy', p.y);
+            circle.setAttribute('r', 5 * vScale);
+            circle.setAttribute('fill', i === 0 && shapeClosed ? '#27ae60' : '#27ae60');
+            circle.setAttribute('stroke', 'white');
+            circle.setAttribute('stroke-width', 2 * vScale);
+            circle.setAttribute('class', 'control-point');
+            if (i === 0 && shapeClosed) {
+                circle.setAttribute('fill', '#f39c12');
+            }
+            pointsGroup.appendChild(circle);
         });
+
+        // If not closed, add subtle highlight on first point to show it's clickable
+        if (!shapeClosed && tracePoints.length > 2) {
+            const firstPoint = tracePoints[0];
+            const ghostCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            ghostCircle.setAttribute('cx', firstPoint.x);
+            ghostCircle.setAttribute('cy', firstPoint.y);
+            ghostCircle.setAttribute('r', 12 * vScale);
+            ghostCircle.setAttribute('fill', 'none');
+            ghostCircle.setAttribute('stroke', '#f39c12');
+            ghostCircle.setAttribute('stroke-width', 2 * vScale);
+            ghostCircle.setAttribute('stroke-dasharray', `${2 * vScale},${2 * vScale}`);
+            ghostCircle.setAttribute('opacity', '0.7');
+            pointsGroup.appendChild(ghostCircle);
+        }
+
+        // Fill shape if closed
+        if (shapeClosed) {
+            const fillPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const pathData = generateBezierPath(tracePoints, true);
+            fillPath.setAttribute('class', 'fill-path');
+            fillPath.setAttribute('d', pathData);
+            fillPath.setAttribute('fill', 'rgba(46, 204, 113, 0.15)');
+            fillPath.setAttribute('stroke', 'none');
+            tracePathElement.parentNode.insertBefore(fillPath, tracePathElement);
+        }
     }
 }
 
@@ -283,22 +276,36 @@ function generateBezierPath(points, closed) {
 
     const tension = curveTension;
     let pathData = `M ${points[0].x} ${points[0].y}`;
+
     const segments = closed ? points.length : points.length - 1;
 
     for (let i = 0; i < segments; i++) {
-        let p2 = points[(i + 1) % points.length];
-        let h1 = getHandles(points, i, tension, closed);
-        let h2 = getHandles(points, (i + 1) % points.length, tension, closed);
+        let p0, p1, p2, p3;
 
-        const cp1x = h1.hOut.absX;
-        const cp1y = h1.hOut.absY;
-        const cp2x = h2.hIn.absX;
-        const cp2y = h2.hIn.absY;
+        if (closed) {
+            p0 = points[(i - 1 + points.length) % points.length];
+            p1 = points[i];
+            p2 = points[(i + 1) % points.length];
+            p3 = points[(i + 2) % points.length];
+        } else {
+            p1 = points[i];
+            p2 = points[i + 1];
+            p0 = i === 0 ? p1 : points[i - 1];
+            p3 = i === points.length - 2 ? p2 : points[i + 2];
+        }
+
+        const cp1x = p1.x + (p2.x - p0.x) * tension;
+        const cp1y = p1.y + (p2.y - p0.y) * tension;
+        const cp2x = p2.x - (p3.x - p1.x) * tension;
+        const cp2y = p2.y - (p3.y - p1.y) * tension;
 
         pathData += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
     }
 
-    if (closed) pathData += ' Z';
+    if (closed) {
+        pathData += ' Z';
+    }
+
     return pathData;
 }
 
@@ -363,10 +370,14 @@ function handleSvgWheel(e) {
 
 function handleSvgMouseDown(e) {
     if (!imageLoaded) return;
+    
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    
     const scaleX = viewBoxState.w / rect.width;
     const scaleY = viewBoxState.h / rect.height;
+
+    // Translated coords using actual viewbox bounds
     const x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
     const y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
 
@@ -377,48 +388,29 @@ function handleSvgMouseDown(e) {
         calibEnd = { x, y };
         isDraggingCalib = true;
         redrawSvg();
-    } else if (mode === 'finger') {
-        const radius = parseFloat(document.getElementById('fingerRadius')?.value) || 10;
-        const pxMm = pixelsPerMm || 1;
-        
-        let clickedIndex = -1;
-        for (let i = 0; i < fingerHoles.length; i++) {
-            let f = fingerHoles[i];
-            let dist = Math.sqrt((x - f.x) ** 2 + (y - f.y) ** 2);
-            if (dist < f.r * pxMm) {
-                clickedIndex = i;
-                break;
-            }
-        }
-
-        if (clickedIndex !== -1) {
-            fingerHoles.splice(clickedIndex, 1); // Delete existing hole
-        } else {
-            fingerHoles.push({ x, y, r: radius }); // Add new hole
-        }
-        redrawSvg();
     } else if (mode === 'trace') {
         const visualThreshold = 15 * scaleX;
-        let traceP = traces[activeTrace];
-        let closed = shapeClosed[activeTrace];
 
-        const clickedIndex = traceP.findIndex(p => {
+        // 1. Check if we're clicking an existing point to DRAG it
+        const clickedIndex = tracePoints.findIndex(p => {
             return Math.sqrt((x - p.x) ** 2 + (y - p.y) ** 2) < visualThreshold;
         });
 
         if (clickedIndex !== -1) {
-            if (clickedIndex === 0 && !closed && traceP.length > 2) {
-                shapeClosed[activeTrace] = true;
+            // Check if clicking first point to close shape (only matters if dragging first point and want to close)
+            if (clickedIndex === 0 && !shapeClosed && tracePoints.length > 2) {
+                shapeClosed = true;
                 checkReadyFor3D();
                 redrawSvg();
                 return;
             }
             dragPointIndex = clickedIndex;
-            return;
+            return; // We grabbed a point, don't generate a new one
         }
 
-        if (!closed) {
-            traceP.push({ x, y });
+        // 2. Otherwise add new point if not closed
+        if (!shapeClosed) {
+            tracePoints.push({ x, y });
             redrawSvg();
         }
     }
@@ -426,17 +418,22 @@ function handleSvgMouseDown(e) {
 
 function handleSvgMouseMove(e) {
     if (!imageLoaded) return;
+
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
+    
     const scaleX = viewBoxState.w / rect.width;
     const scaleY = viewBoxState.h / rect.height;
 
     if (isPanning) {
         const dx = (e.clientX - panStart.x) * scaleX;
         const dy = (e.clientY - panStart.y) * scaleY;
+        
         viewBoxState.x -= dx;
         viewBoxState.y -= dy;
+        
         svg.setAttribute('viewBox', `${viewBoxState.x} ${viewBoxState.y} ${viewBoxState.w} ${viewBoxState.h}`);
+        
         panStart = { x: e.clientX, y: e.clientY };
         return;
     }
@@ -447,8 +444,9 @@ function handleSvgMouseMove(e) {
         redrawSvg();
     } 
     else if (mode === 'trace' && dragPointIndex !== -1) {
-        traces[activeTrace][dragPointIndex].x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
-        traces[activeTrace][dragPointIndex].y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
+        // Dragging an individual point
+        tracePoints[dragPointIndex].x = viewBoxState.x + (e.clientX - rect.left) * scaleX;
+        tracePoints[dragPointIndex].y = viewBoxState.y + (e.clientY - rect.top) * scaleY;
         redrawSvg();
     }
 }
@@ -486,9 +484,7 @@ function updateCalibration() {
 }
 
 function checkReadyFor3D() {
-    let anyClosed = shapeClosed.some(c => c);
-    let anyValid = traces.some(t => t.length >= 3);
-    if (pixelsPerMm > 0 && anyClosed && anyValid) {
+    if (pixelsPerMm > 0 && shapeClosed && tracePoints.length >= 3) {
         generate3dBtn.disabled = false;
     } else {
         generate3dBtn.disabled = true;
@@ -507,8 +503,7 @@ function init3D() {
 
     const aspect = viewer3d.clientWidth / viewer3d.clientHeight;
     camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 10000);
-    camera.up.set(0, 0, 1);
-    camera.position.set(0, -150, 100);
+    camera.position.set(0, 100, 150);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(viewer3d.clientWidth, viewer3d.clientHeight);
@@ -529,7 +524,6 @@ function init3D() {
 
     // Grid helper
     const gridHelper = new THREE.GridHelper(200, 20, 0xcccccc, 0xeeeeee);
-    gridHelper.rotation.x = Math.PI / 2; // Rotated to match Z-up XY plane
     scene.add(gridHelper);
 
     window.addEventListener('resize', onWindowResize, false);
@@ -586,8 +580,8 @@ function getOffsetPolygon(points, offsetMm) {
 
 function generate3DModel() {
     console.log("[Step 1] generate3DModel() initiated.");
-    if (!pixelsPerMm) {
-        console.warn("[Cancelled] Scale not set");
+    if (!pixelsPerMm || !shapeClosed) {
+        console.warn("[Cancelled] Scale not set or shape not closed");
         return;
     }
 
@@ -603,75 +597,64 @@ function generate3DModel() {
     const trayMode = document.getElementById('trayMode').value;
     const bevelSize = parseFloat(document.getElementById('bevelSize').value) || 0;
 
-    let allHolePolygons = [];
+    const buildChamferWall = (pts1, pts2, z1, z2, faceOut) => {
+        const vertices = [];
+        const indices = [];
+        const len = pts1.length;
+        for(let i=0; i<len; i++) {
+            vertices.push(pts1[i].x, pts1[i].y, z1);
+        }
+        for(let i=0; i<len; i++) {
+            vertices.push(pts2[i].x, pts2[i].y, z2);
+        }
+        for(let i=0; i<len; i++) {
+            const next = (i+1)%len;
+            const v1 = i;
+            const v2 = next;
+            const v3 = i + len;
+            const v4 = next + len;
+            
+            if (faceOut) {
+                indices.push(v1, v2, v4);
+                indices.push(v1, v4, v3);
+            } else {
+                indices.push(v1, v4, v2);
+                indices.push(v1, v3, v4);
+            }
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geom.setIndex(indices);
+        geom.computeVertexNormals();
+        return geom;
+    };
+    console.log(`[Step 2] Parameters: baseThick=${baseThick}, wallHeight=${wallHeight}, wallThick=${wallThick}, tolerance=${tolerance}, mode=${trayMode}`);
+
+    // Use smoothed trace points
+    const smoothedPoints = extractPointsFromBezier(tracePoints);
+    console.log(`[Step 2b] Points smoothed. ${tracePoints.length} → ${smoothedPoints.length}`);
+
+    // Center coordinates
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    // Process all traces
-    for(let t = 0; t < traces.length; t++) {
-        if (!shapeClosed[t] || traces[t].length < 3) continue;
-        const smoothedPoints = extractPointsFromBezier(traces[t], true);
-        
-        smoothedPoints.forEach(p => {
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-        });
-
-        allHolePolygons.push(smoothedPoints);
-    }
+    smoothedPoints.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    });
 
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
 
-    const scale = 1000;
-    const subj = new ClipperLib.Paths();
-    
-    for(let pts of allHolePolygons) {
-        const path = [];
-        for(let p of pts) {
-            path.push({
-                X: Math.round(((p.x - centerX) / pixelsPerMm) * scale),
-                Y: Math.round((-(p.y - centerY) / pixelsPerMm) * scale)
-            });
-        }
-        subj.push(path);
-    }
+    const mmPoints = smoothedPoints.map(p => ({
+        x: (p.x - centerX) / pixelsPerMm,
+        y: -(p.y - centerY) / pixelsPerMm
+    }));
 
-    for(let f of fingerHoles) {
-        const path = [];
-        const cx = (f.x - centerX) / pixelsPerMm;
-        const cy = -(f.y - centerY) / pixelsPerMm;
-        const steps = 32;
-        for (let i=0; i<steps; i++) {
-            const angle = (i/steps)*Math.PI*2;
-            path.push({
-                X: Math.round((cx + Math.cos(angle)*f.r) * scale),
-                Y: Math.round((cy + Math.sin(angle)*f.r) * scale)
-            });
-        }
-        subj.push(path);
-    }
+    let holePoints = getOffsetPolygon(mmPoints, tolerance);
 
-    const c = new ClipperLib.Clipper();
-    c.AddPaths(subj, ClipperLib.PolyType.ptSubject, true);
-    const solution = new ClipperLib.Paths();
-    c.Execute(ClipperLib.ClipType.ctUnion, solution, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
-
-    const co = new ClipperLib.ClipperOffset();
-    co.AddPaths(solution, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-    const offsetPaths = new ClipperLib.Paths();
-    co.Execute(offsetPaths, tolerance * scale);
-
-    const finalHoles = [];
-    for(let path of offsetPaths) {
-        let hole = path.map(p => ({ x: p.X/scale, y: p.Y/scale }));
-        if (!THREE.ShapeUtils.isClockWise(hole)) hole.reverse();
-        finalHoles.push(hole);
-    }
-
-    let holePoints = [];
-    if (finalHoles.length > 0) holePoints = finalHoles[0]; 
+    const holeIsCW = THREE.ShapeUtils.isClockWise(holePoints);
+    if (!holeIsCW) holePoints.reverse();
 
     const outerShape = new THREE.Shape();
     const baseShape = new THREE.Shape();
@@ -679,74 +662,128 @@ function generate3DModel() {
     let unitsX = 1, unitsY = 1;
     let shiftZ = 0;
     
+    // Variables for Gridfinity and Bounding
     let boxWidth, boxHeight, boxCX, boxCY, rX, rY, gridRadius;
+    
     const buildRoundedRect = (s, x, y, width, height, r) => {
-        s.moveTo(x + r, y); s.lineTo(x + width - r, y); s.quadraticCurveTo(x + width, y, x + width, y + r);
-        s.lineTo(x + width, y + height - r); s.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
-        s.lineTo(x + r, y + height); s.quadraticCurveTo(x, y + height, x, y + height - r);
-        s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+        s.moveTo(x + r, y);
+        s.lineTo(x + width - r, y);
+        s.quadraticCurveTo(x + width, y, x + width, y + r);
+        s.lineTo(x + width, y + height - r);
+        s.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        s.lineTo(x + r, y + height);
+        s.quadraticCurveTo(x, y + height, x, y + height - r);
+        s.lineTo(x, y + r);
+        s.quadraticCurveTo(x, y, x + r, y);
     };
 
     if (trayMode === 'exact') {
-        const outerCo = new ClipperLib.ClipperOffset();
-        outerCo.AddPaths(offsetPaths, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-        const outerSol = new ClipperLib.Paths();
-        outerCo.Execute(outerSol, wallThick * scale);
+        let outerPoints = getOffsetPolygon(holePoints, wallThick);
         
-        let outerPoints = outerSol[0].map(p => ({ x: p.X/scale, y: p.Y/scale }));
-        if (THREE.ShapeUtils.isClockWise(outerPoints)) outerPoints.reverse();
-        
+        const outerIsCW = THREE.ShapeUtils.isClockWise(outerPoints);
+        if (outerIsCW) outerPoints.reverse();
+
         outerPoints.forEach((p, i) => {
-            if (i === 0) { outerShape.moveTo(p.x, p.y); baseShape.moveTo(p.x, p.y); }
-            else { outerShape.lineTo(p.x, p.y); baseShape.lineTo(p.x, p.y); }
+            if (i === 0) {
+                outerShape.moveTo(p.x, p.y);
+                baseShape.moveTo(p.x, p.y);
+            } else {
+                outerShape.lineTo(p.x, p.y);
+                baseShape.lineTo(p.x, p.y);
+            }
         });
     } else {
+        // Bounding or Gridfinity mode
         let hMinX = Infinity, hMinY = Infinity, hMaxX = -Infinity, hMaxY = -Infinity;
-        finalHoles.forEach(hole => hole.forEach(p => {
+        holePoints.forEach(p => {
             if (p.x < hMinX) hMinX = p.x;
             if (p.x > hMaxX) hMaxX = p.x;
             if (p.y < hMinY) hMinY = p.y;
             if (p.y > hMaxY) hMaxY = p.y;
-        }));
+        });
 
         if (trayMode === 'bounding') {
             boxWidth = (hMaxX - hMinX) + (wallThick * 2);
             boxHeight = (hMaxY - hMinY) + (wallThick * 2);
-            boxCX = (hMaxX + hMinX) / 2; boxCY = (hMaxY + hMinY) / 2;
+            boxCX = (hMaxX + hMinX) / 2;
+            boxCY = (hMaxY + hMinY) / 2;
         } else if (trayMode === 'gridfinity') {
             const minInnerWidth = (hMaxX - hMinX) + (wallThick * 2);
             const minInnerHeight = (hMaxY - hMinY) + (wallThick * 2);
-            unitsX = Math.ceil(minInnerWidth / 42); unitsY = Math.ceil(minInnerHeight / 42);
-            boxWidth = unitsX * 42 - 0.5; boxHeight = unitsY * 42 - 0.5;
-            boxCX = (hMaxX + hMinX) / 2; boxCY = (hMaxY + hMinY) / 2;
-            shiftZ = 4.6; 
+            
+            unitsX = Math.ceil(minInnerWidth / 42);
+            unitsY = Math.ceil(minInnerHeight / 42);
+            
+            boxWidth = unitsX * 42 - 0.5;
+            boxHeight = unitsY * 42 - 0.5;
+            boxCX = (hMaxX + hMinX) / 2;
+            boxCY = (hMaxY + hMinY) / 2;
+            shiftZ = 4.6; // We sit on top of the feet
         }
 
-        rX = boxCX - boxWidth / 2; rY = boxCY - boxHeight / 2;
+        rX = boxCX - boxWidth / 2;
+        rY = boxCY - boxHeight / 2;
         gridRadius = trayMode === 'gridfinity' ? 4.0 : 2;
+
         buildRoundedRect(outerShape, rX, rY, boxWidth, boxHeight, gridRadius);
         buildRoundedRect(baseShape, rX, rY, boxWidth, boxHeight, gridRadius);
     }
 
-    finalHoles.forEach(holePts => {
-        const holeShape = new THREE.Path();
-        holePts.forEach((p, i) => {
-            if (i === 0) holeShape.moveTo(p.x, p.y);
-            else holeShape.lineTo(p.x, p.y);
-        });
-        outerShape.holes.push(holeShape);
+    console.log("[Step 4] Shape defined. Creating Three.js geometries.");
+
+    let bevelGap = Math.max(0, Math.min(bevelSize, wallHeight));
+
+    const holeShape = new THREE.Path();
+    holePoints.forEach((p, i) => {
+        if (i === 0) holeShape.moveTo(p.x, p.y);
+        else holeShape.lineTo(p.x, p.y);
     });
 
+    outerShape.holes.push(holeShape);
+
+    console.log("[Step 5] Extruding walls.");
+    
+    // Main Wall
     const wallGeom = new THREE.ExtrudeGeometry(outerShape, {
-        depth: wallHeight,
-        bevelEnabled: bevelSize > 0,
-        bevelThickness: bevelSize,
-        bevelSize: bevelSize,
-        bevelSegments: 3,
-        curveSegments: 12
+        depth: wallHeight - bevelGap,
+        bevelEnabled: false
     });
+    
+    let bevelLayers = [];
+    if (bevelGap > 0) {
+        // Create a stepped chamfer for the hole because boolean operations aren't easily available here,
+        // and Clipper offsets can change the vertex count so we can't loft perfectly.
+        const steps = Math.max(1, Math.ceil(bevelGap * 10)); // 0.1mm layers for a smooth 3D print
+        const layerH = bevelGap / steps;
+        
+        for (let s = 1; s <= steps; s++) { // note: layer 0 is handled closely by main wall top
+            const currentGap = (s / steps) * bevelGap;
+            let hPoints = getOffsetPolygon(holePoints, currentGap);
+            if (!THREE.ShapeUtils.isClockWise(hPoints)) hPoints.reverse();
+            
+            const sliceShape = new THREE.Shape(outerShape.extractPoints().shape);
+            const path = new THREE.Path();
+            hPoints.forEach((p, i) => {
+                if (i === 0) path.moveTo(p.x, p.y);
+                else path.lineTo(p.x, p.y);
+            });
+            sliceShape.holes.push(path);
+            
+            const sliceGeom = new THREE.ExtrudeGeometry(sliceShape, {
+                depth: layerH,
+                bevelEnabled: false
+            });
+            sliceGeom.translate(0, 0, wallHeight - bevelGap + (s - 1) * layerH);
+            bevelLayers.push(new THREE.Mesh(sliceGeom)); // material set later
+        }
+    }
 
-    const baseGeom = new THREE.ExtrudeGeometry(baseShape, { depth: baseThick, bevelEnabled: false });
+    console.log("[Step 6] Extruding base.");
+    
+    const baseGeom = new THREE.ExtrudeGeometry(baseShape, {
+        depth: baseThick,
+        bevelEnabled: false
+    });
 
     wallGeom.translate(0, 0, shiftZ + baseThick);
     baseGeom.translate(0, 0, shiftZ);
@@ -754,49 +791,28 @@ function generate3DModel() {
     wallGeom.computeVertexNormals();
     baseGeom.computeVertexNormals();
 
-    const material = new THREE.MeshStandardMaterial({ color: 0x667eea, roughness: 0.6, metalness: 0.1 });
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x667eea,
+        roughness: 0.6,
+        metalness: 0.1
+    });
+
     const wallMesh = new THREE.Mesh(wallGeom, material);
     const baseMesh = new THREE.Mesh(baseGeom, material);
 
     trayMesh = new THREE.Group();
     trayMesh.add(wallMesh);
+    if (bevelLayers.length > 0) {
+        bevelLayers.forEach(mesh => {
+            mesh.material = material;
+            mesh.position.z = shiftZ + baseThick;
+            trayMesh.add(mesh);
+        });
+    }
     trayMesh.add(baseMesh);
-
 
     // Add Gridfinity Feet
     if (trayMode === 'gridfinity') {
-        const buildChamferWall = (pts1, pts2, z1, z2, faceOut) => {
-            const vertices = [];
-            const indices = [];
-            const len = pts1.length;
-            for(let i=0; i<len; i++) {
-                vertices.push(pts1[i].x, pts1[i].y, z1);
-            }
-            for(let i=0; i<len; i++) {
-                vertices.push(pts2[i].x, pts2[i].y, z2);
-            }
-            for(let i=0; i<len; i++) {
-                const next = (i+1)%len;
-                const v1 = i;
-                const v2 = next;
-                const v3 = i + len;
-                const v4 = next + len;
-                
-                if (faceOut) {
-                    indices.push(v1, v2, v4);
-                    indices.push(v1, v4, v3);
-                } else {
-                    indices.push(v1, v4, v2);
-                    indices.push(v1, v3, v4);
-                }
-            }
-            const geom = new THREE.BufferGeometry();
-            geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            geom.setIndex(indices);
-            geom.computeVertexNormals();
-            return geom;
-        };
-
         const makeRoundedRect = (w, r) => {
             const s = new THREE.Shape();
             const hw = w/2;
@@ -897,22 +913,23 @@ function generate3DModel() {
         trayMesh.add(lipGroup);
     }
 
+    trayMesh.rotation.x = -Math.PI / 2;
+
     scene.add(trayMesh);
     downloadStlBtn.disabled = false;
 
+    console.log("[Step 7] Positioning camera.");
     const box = new THREE.Box3().setFromObject(trayMesh);
     const size = box.getSize(new THREE.Vector3()).length();
     const center = box.getCenter(new THREE.Vector3());
 
-    camera.position.set(center.x + size*0.5, center.y - size, center.z + size);
-    camera.up.set(0, 0, 1);
+    camera.position.set(center.x, center.y + size * 1.5, center.z + size * 1.5);
     controls.target.copy(center);
     controls.maxDistance = size * 10;
     controls.update();
 
     console.log("[Step 8] Complete! Model ready to print.");
 }
-
 
 function downloadSTL() {
     if (!trayMesh) return;
@@ -935,55 +952,38 @@ function downloadSTL() {
     console.log("[Download] STL file downloaded successfully");
 }
 
-
-function getHandles(points, i, tension, closed) {
-    let p = points[i];
-    let pNext, pPrev;
-    if (closed) {
-        pNext = points[(i + 1) % points.length];
-        pPrev = points[(i - 1 + points.length) % points.length];
-    } else {
-        pNext = i < points.length - 1 ? points[i + 1] : p;
-        pPrev = i > 0 ? points[i - 1] : p;
-    }
-
-    let hOutX = p.hasManualHandles && p.hOut ? p.hOut.x : (pNext.x - pPrev.x) * tension;
-    let hOutY = p.hasManualHandles && p.hOut ? p.hOut.y : (pNext.y - pPrev.y) * tension;
-
-    let hInX = p.hasManualHandles && p.hIn ? p.hIn.x : -(pNext.x - pPrev.x) * tension;
-    let hInY = p.hasManualHandles && p.hIn ? p.hIn.y : -(pNext.y - pPrev.y) * tension;
-    
-    if (!closed && i === points.length - 1) { hOutX = 0; hOutY = 0; }
-    if (!closed && i === 0) { hInX = 0; hInY = 0; }
-
-    return { 
-        hOut: { dx: hOutX, dy: hOutY, absX: p.x + hOutX, absY: p.y + hOutY },
-        hIn:  { dx: hInX, dy: hInY, absX: p.x + hInX, absY: p.y + hInY }
-    };
-}
-
-function extractPointsFromBezier(points, isClosed, resolution = 5) {
+function extractPointsFromBezier(points, resolution = 5) {
     if (points.length < 2) return points;
 
     const result = [];
     const tension = curveTension;
-    const closed = isClosed;
+    const closed = shapeClosed;
     const segments = closed ? points.length : points.length - 1;
 
     for (let i = 0; i < segments; i++) {
-        let p1 = points[i];
-        let p2 = points[(i + 1) % points.length];
-        
+        let p0, p1, p2, p3;
+
+        if (closed) {
+            p0 = points[(i - 1 + points.length) % points.length];
+            p1 = points[i];
+            p2 = points[(i + 1) % points.length];
+            p3 = points[(i + 2) % points.length];
+        } else {
+            p1 = points[i];
+            p2 = points[i + 1];
+            p0 = i === 0 ? p1 : points[i - 1];
+            p3 = i === points.length - 2 ? p2 : points[i + 2];
+        }
+
         result.push(p1);
 
-        let h1 = getHandles(points, i, tension, closed);
-        let h2 = getHandles(points, (i + 1) % points.length, tension, closed);
+        // Cardinal spline control points matching the visual SVG exactly
+        const cp1x = p1.x + (p2.x - p0.x) * tension;
+        const cp1y = p1.y + (p2.y - p0.y) * tension;
+        const cp2x = p2.x - (p3.x - p1.x) * tension;
+        const cp2y = p2.y - (p3.y - p1.y) * tension;
 
-        const cp1x = h1.hOut.absX;
-        const cp1y = h1.hOut.absY;
-        const cp2x = h2.hIn.absX;
-        const cp2y = h2.hIn.absY;
-
+        // Evaluate standard cubic Bezier curve to 3D segments
         for (let t = 1; t < resolution; t++) {
             const tt = t / resolution;
             const mt = 1 - tt;
